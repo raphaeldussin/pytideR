@@ -42,3 +42,16 @@ assert np.equal(jcoastalcell, jcoastalcell_ben).all()
 assert np.equal(icoastalcell, icoastalcell_ben).all()
 
 angle = pytideR.define_angle(coast, mask)
+
+angle_ben = xr.open_dataset('/home/Raphael.Dussin/Sonya/Internal_tides_reflection/from_ben/raytracing_deliverables/refl_angle_360x210_global.nc')['refl_angle']
+
+# my algo resolves outer columns/rows but not ben's
+assert np.equal(angle.values[1:-1,1:-1], angle_ben.fillna(1.e+20).values[1:-1,1:-1]).all()
+
+plt.figure(figsize=[12,10])
+plt.pcolormesh(cnx, cny, angle.where(angle != 1.e+20).values - angle_ben.values)
+plt.colorbar()
+plt.grid()
+#plt.plot(icoastalcell, jcoastalcell, 'ro')
+plt.show()
+
