@@ -7,7 +7,7 @@ import xarray as xr
 import pytideR
 import matplotlib.pylab as plt
 import numpy as np
-import scipy.io 
+import scipy.io
 
 mask = xr.open_dataset('../data/ocean_mask_OM_1deg.nc')['mask']
 
@@ -16,7 +16,7 @@ jcoastalcell, icoastalcell = np.where(coast >= 0.98)
 
 # NB convention: i,j are cell centers
 # pcolormesh needs N+1 coordinates points to plot properly between indices
-# we want full indices to be cell centers so land points will go from side to side 
+# we want full indices to be cell centers so land points will go from side to side
 # land points needs offset
 nx = len(mask['nx'])
 ny = len(mask['ny'])
@@ -54,4 +54,16 @@ plt.colorbar()
 plt.grid()
 #plt.plot(icoastalcell, jcoastalcell, 'ro')
 plt.show()
+
+# Loading slope coeficients from Sam Kelly
+ds_kelly = pytideR.load_kelly2013_data(matfile='../data/slope_16.mat')
+
+# exploring the data
+plt.figure()
+plt.scatter(ds_kelly['lon'].sel(bounds='down'), ds_kelly['lat'].sel(bounds='down'), color='tab:blue', marker='o')
+plt.scatter(ds_kelly['lon'].sel(bounds='up'), ds_kelly['lat'].sel(bounds='up'), color='tab:orange', marker='o')
+
+plt.figure()
+plt.scatter(ds_kelly['lon'].sel(bounds='down'), ds_kelly['lat'].sel(bounds='down'), s=ds_kelly['H'].sel(bounds='down'), marker='o')
+plt.scatter(ds_kelly['lon'].sel(bounds='up'), ds_kelly['lat'].sel(bounds='up'), s=ds_kelly['H'].sel(bounds='up'), marker='o')
 

@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 # import pyresample
+from scipy.io import loadmat
 from scipy.ndimage import binary_erosion
 from numba import njit
 
@@ -60,6 +61,7 @@ def define_angle(coastalcells, mask, periodic=True, northfold=True):
     angle[:] = angledata[1:-1, 1:-1]
     return angle
 
+
 # numba gets 4 times speedup on 1x1deg grid
 @njit
 def compute_angle(jcoastalcells, icoastalcells, mask_extended):
@@ -86,6 +88,7 @@ def compute_angle(jcoastalcells, icoastalcells, mask_extended):
         n7 = (mask_extended[jcell-1, icell] == 0)
         n8 = (mask_extended[jcell-1, icell+1] == 0)
 
+        # TO DO: 4+ points scenarios
         # strait coast scenarios
         if n1 and n2 and n8:
             angledata[jcell, icell] = 3 * np.pi / 2.
@@ -135,3 +138,71 @@ def compute_angle(jcoastalcells, icoastalcells, mask_extended):
             raise ValueError('case not found')
 
     return angledata
+
+
+def load_kelly2013_data(matfile='slope_16.mat'):
+    """
+    load data from the mat file of Kelly et al., 2013
+    doi:10.1002/grl.50872
+    """
+
+    rawdata = loadmat(matfile)
+    nsections, nbounds = rawdata['slope']['lon'][0][0].shape
+    _, nz = rawdata['slope']['z'][0][0].shape
+    nmodes = rawdata['slope']['Nm'][0][0][0][0]
+    dx = rawdata['slope']['dx'][0][0][0][0]
+
+    # section has no natural value, set list of integers
+    section = np.arange(nsections)
+    mode = 1 + np.arange(nmodes) # mode 0 is surface mode in litterature
+    bounds = ['down', 'up']
+
+    ds = xr.Dataset()
+    ds['lon'] = xr.DataArray(data=rawdata['slope']['lon'][0][0],
+                             coords={'cross_section': (['cross_section'], section),
+                                     'bounds': (['bounds'], bounds)},
+                             dims=('cross_section', 'bounds'))
+    ds['lon'].attrs = {'long_name': 'longitude', 'units': 'degrees_E'}
+
+    ds['lat'] = xr.DataArray(data=rawdata['slope']['lat'][0][0],
+                             coords={'cross_section': (['cross_section'], section),
+                                     'bounds': (['bounds'], bounds)},
+                             dims=('cross_section', 'bounds'))
+    ds['lat'].attrs = {'long_name': 'latitude', 'units': 'degrees_N'}
+
+    ds['z'] = xr.DataArray(data=rawdata['slope']['z'][0][0][0],
+                           coords={'z': (['z'], rawdata['slope']['z'][0][0][0])},
+                           dims=('z'))
+    ds['z'].attrs = {'long_name': 'depth', 'units': 'm downwards'}
+
+    ds['H'] = xr.DataArray(data=rawdata['slope']['H'][0][0],
+                           coords={'cross_section': (['cross_section'], section),
+                                   'bounds': (['bounds'], bounds)},
+                           dims=('cross_section', 'bounds'))
+    ds['H'].attrs = {'long_name': 'bathymetry', 'units': 'm upwards'}
+
+    ds['N2'] = xr.DataArray(data=rawdata['slope']['N2'][0][0],
+                            coords={'cross_section': (['cross_section'], section),
+                                    'z': (['z'], rawdata['slope']['z'][0][0][0])},
+                            dims=('cross_section', 'z'))
+    ds['N2'].attrs = {'long_name': 'Brunt-Vaisala frequency', 'units': 's-1'}
+
+    ds['refl'] = xr.DataArray(data=rawdata['slope']['refl'][0][0],
+                              coords={'cross_section': (['cross_section'], section),
+                                      'mode': (['mode'], mode)},
+                              dims=('cross_section', 'mode'))
+    ds['refl'].attrs = {'long_name': 'internal wave reflexion coef', 'units': 'nondim'}
+
+    ds['trans'] = xr.DataArray(data=rawdata['slope']['trans'][0][0],
+                               coords={'cross_section': (['cross_section'], section),
+                                       'mode': (['mode'], mode)},
+                               dims=('cross_section', 'mode'))
+    ds['trans'].attrs = {'long_name': 'internal wave transmission coef', 'units': 'nondim'}
+
+    ds['dx'] = rawdata['slope']['dx'][0][0][0][0]
+    ds['dx'].attrs = {'long_name': 'horizontal resolution', 'units': 'm'}
+
+    ds['Nm'] = mode
+    ds['Nm'].attrs = {'long_name': 'vertical modes'}
+
+    return ds
