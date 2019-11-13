@@ -151,55 +151,63 @@ def load_kelly2013_data(matfile='slope_16.mat'):
     _, nz = rawdata['slope']['z'][0][0].shape
     nmodes = rawdata['slope']['Nm'][0][0][0][0]
     dx = rawdata['slope']['dx'][0][0][0][0]
-
+    z = rawdata['slope']['z'][0][0][0]
     # section has no natural value, set list of integers
     section = np.arange(nsections)
-    mode = 1 + np.arange(nmodes) # mode 0 is surface mode in litterature
+    mode = 1 + np.arange(nmodes)  # mode 0 is surface mode in litterature
     bounds = ['down', 'up']
 
     ds = xr.Dataset()
     ds['lon'] = xr.DataArray(data=rawdata['slope']['lon'][0][0],
-                             coords={'cross_section': (['cross_section'], section),
+                             coords={'cross_section': (['cross_section'],
+                                                       section),
                                      'bounds': (['bounds'], bounds)},
                              dims=('cross_section', 'bounds'))
     ds['lon'].attrs = {'long_name': 'longitude', 'units': 'degrees_E'}
 
     ds['lat'] = xr.DataArray(data=rawdata['slope']['lat'][0][0],
-                             coords={'cross_section': (['cross_section'], section),
+                             coords={'cross_section': (['cross_section'],
+                                                       section),
                                      'bounds': (['bounds'], bounds)},
                              dims=('cross_section', 'bounds'))
     ds['lat'].attrs = {'long_name': 'latitude', 'units': 'degrees_N'}
 
-    ds['z'] = xr.DataArray(data=rawdata['slope']['z'][0][0][0],
-                           coords={'z': (['z'], rawdata['slope']['z'][0][0][0])},
+    ds['z'] = xr.DataArray(data=z,
+                           coords={'z': (['z'], z)},
                            dims=('z'))
     ds['z'].attrs = {'long_name': 'depth', 'units': 'm downwards'}
 
     ds['H'] = xr.DataArray(data=rawdata['slope']['H'][0][0],
-                           coords={'cross_section': (['cross_section'], section),
+                           coords={'cross_section': (['cross_section'],
+                                                     section),
                                    'bounds': (['bounds'], bounds)},
                            dims=('cross_section', 'bounds'))
     ds['H'].attrs = {'long_name': 'bathymetry', 'units': 'm upwards'}
 
     ds['N2'] = xr.DataArray(data=rawdata['slope']['N2'][0][0],
-                            coords={'cross_section': (['cross_section'], section),
-                                    'z': (['z'], rawdata['slope']['z'][0][0][0])},
+                            coords={'cross_section': (['cross_section'],
+                                                      section),
+                                    'z': (['z'], z)},
                             dims=('cross_section', 'z'))
     ds['N2'].attrs = {'long_name': 'Brunt-Vaisala frequency', 'units': 's-1'}
 
     ds['refl'] = xr.DataArray(data=rawdata['slope']['refl'][0][0],
-                              coords={'cross_section': (['cross_section'], section),
+                              coords={'cross_section': (['cross_section'],
+                                                        section),
                                       'mode': (['mode'], mode)},
                               dims=('cross_section', 'mode'))
-    ds['refl'].attrs = {'long_name': 'internal wave reflexion coef', 'units': 'nondim'}
+    ds['refl'].attrs = {'long_name': 'internal wave reflexion coef',
+                        'units': 'nondim'}
 
     ds['trans'] = xr.DataArray(data=rawdata['slope']['trans'][0][0],
-                               coords={'cross_section': (['cross_section'], section),
+                               coords={'cross_section': (['cross_section'],
+                                                         section),
                                        'mode': (['mode'], mode)},
                                dims=('cross_section', 'mode'))
-    ds['trans'].attrs = {'long_name': 'internal wave transmission coef', 'units': 'nondim'}
+    ds['trans'].attrs = {'long_name': 'internal wave transmission coef',
+                         'units': 'nondim'}
 
-    ds['dx'] = rawdata['slope']['dx'][0][0][0][0]
+    ds['dx'] = dx
     ds['dx'].attrs = {'long_name': 'horizontal resolution', 'units': 'm'}
 
     ds['Nm'] = mode
