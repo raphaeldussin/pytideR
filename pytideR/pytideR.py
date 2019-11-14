@@ -4,6 +4,7 @@ import numpy as np
 from scipy.io import loadmat
 from scipy.ndimage import binary_erosion
 from numba import njit
+from scipy.spatial import KDTree
 
 
 def find_costal_cells(mask):
@@ -214,3 +215,87 @@ def load_kelly2013_data(matfile='slope_16.mat'):
     ds['Nm'].attrs = {'long_name': 'vertical modes'}
 
     return ds
+
+
+@njit
+def distance_on_unit_sphere(lat1, long1, lat2, long2):
+
+    # Convert latitude and longitude to
+    # spherical coordinates in radians.
+    degrees_to_radians = np.pi/180.0
+
+    # phi = 90 - latitude
+    phi1 = (90.0 - lat1)*degrees_to_radians
+    phi2 = (90.0 - lat2)*degrees_to_radians
+
+    # theta = longitude
+    theta1 = long1*degrees_to_radians
+    theta2 = long2*degrees_to_radians
+    # Compute spherical distance from spherical coordinates.
+    # For two locations in spherical coordinates
+    # (1, theta, phi) and (1, theta, phi)
+    # cosine( arc length ) =
+    #    sin phi sin phi' cos(theta-theta') + cos phi cos phi'
+    # distance = rho * arc length
+    cos = (np.sin(phi1)*np.sin(phi2)*np.cos(theta1 - theta2) +
+           np.cos(phi1)*np.cos(phi2))
+    arc = np.arccos(cos)
+    # Remember to multiply arc by the radius of the earth
+    # in your favorite set of units to get length.
+    return arc
+
+
+def find_closest_grid_cell_brute(lon, lat, longrid, latgrid):
+    """
+    find closest ocean cell of coordinates longrid/latgrid
+    given a pair of lon/lat
+    """
+
+    distances = distance_on_unit_sphere(lat, lon, latgrid, longrid)
+    ijmin = distances.argmin()
+    jmin, imin = np.unravel_index(ijmin, longrid.shape)
+    print(jmin, imin)
+    return jmin, imin
+
+
+def find_closest_grid_cell_kdtree(lon, lat, tree, nbpts=1):
+    """ find the nbpts closest points from lon/lat in tree """
+    if type(lon) == 'xr.core.dataarray.DataArray':
+        lon = lon.values
+    if type(lat) == 'xr.core.dataarray.DataArray':
+        lat = lat.values
+    query = tree.query([lon, lat], k=nbpts)
+    return query
+
+
+def build_kdtree(lon, lat):
+    """ build the KDTree for collection of lon/lat points """
+    if isinstance(lon, xr.core.dataarray.DataArray):
+        lond = lon.values
+    else:
+        lond = lon
+    if isinstance(lat, xr.core.dataarray.DataArray):
+        latd = lat.values
+    else:
+        latd = lat
+    tree = KDTree(list(zip(lond.ravel(), latd.ravel())))
+    return tree
+
+
+def query_to_model_indices(query, lonmodel):
+    """ return distance and grid indices from query """
+    distance, ravel_index = query
+    j, i = np.unravel_index(ravel_index, lonmodel.shape)
+    return distance, i, j
+
+
+def change_lon_reference(lon_in, lon_ref):
+    """ use periodicity to move lon_in in the range of lon_ref """
+    for lon in lon_in:
+        if lon > lon_ref.max():
+            lon -= 360
+        elif lon < lon_ref.min():
+            lon += 360
+        else:
+            pass
+    return lon_in
