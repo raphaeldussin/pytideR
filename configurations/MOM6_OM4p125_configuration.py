@@ -12,10 +12,10 @@ import scipy.io
 projectdir = '/home/Raphael.Dussin/Sonya/Internal_tides_reflection/'
 bendir = f'{projectdir}/from_ben/raytracing_deliverables/'
 
-griddir = '/home/Raphael.Dussin/Sonya/Internal_tides_reflection/pytideR/data/'
-mask = xr.open_dataset(f'{griddir}/ocean_mask_OM_1deg.nc')['mask']
-geolon = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['geolon']
-geolat = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['geolat']
+griddir = '/local2/home/sandbox/'
+mask = xr.open_dataset(f'{griddir}/ocean_daily.static.nc')['wet']
+geolon = xr.open_dataset(f'{griddir}/ocean_daily.static.nc')['geolon']
+geolat = xr.open_dataset(f'{griddir}/ocean_daily.static.nc')['geolat']
 
 coast = pytideR.find_costal_cells(mask)
 jcoastalcell, icoastalcell = np.where(coast >= 0.98)
@@ -44,16 +44,9 @@ filecoastben = f'{bendir}/coast_data.mat'
 coastben = scipy.io.loadmat(filecoastben)['coast']
 jcoastalcell_ben, icoastalcell_ben = np.where(coastben >= 0.98)
 
-assert np.equal(jcoastalcell, jcoastalcell_ben).all()
-assert np.equal(icoastalcell, icoastalcell_ben).all()
-
 angle = pytideR.define_angle(coast, mask)
 
 angle_ben = xr.open_dataset(f'{bendir}/refl_angle_360x210_global.nc')['refl_angle']
-
-# my algo resolves outer columns/rows but not ben's
-assert np.equal(angle.values[1:-1, 1:-1],
-                angle_ben.fillna(1.e+20).values[1:-1, 1:-1]).all()
 
 check = False
 if check:

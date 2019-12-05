@@ -5,6 +5,7 @@ from scipy.io import loadmat
 from scipy.ndimage import binary_erosion
 from numba import njit
 from scipy.spatial import KDTree
+from tqdm import tqdm
 
 
 def find_costal_cells(mask):
@@ -15,8 +16,7 @@ def find_costal_cells(mask):
     we expand land (0) values by eroding ocean (1) values
     """
     # work on nx+1, ny+1 arrays to avoid boundary issues
-    ny = len(mask['ny'])
-    nx = len(mask['nx'])
+    ny, nx = mask.values.shape
     mask_w_halos = np.ones((ny+2, nx+2))
     mask_w_halos[1:-1, 1:-1] = mask.values
     expanded = binary_erosion(mask_w_halos)
@@ -258,27 +258,26 @@ def find_closest_grid_cell_brute(lon, lat, longrid, latgrid):
     return jmin, imin
 
 
+def xr2npy(array):
+    """return numpy.array from np or xr array"""
+    if type(array) == xr.core.dataarray.DataArray:
+        array = array.values
+    return array
+
+
 def find_closest_grid_cell_kdtree(lon, lat, tree, nbpts=1):
     """ find the nbpts closest points from lon/lat in tree """
-    if type(lon) == 'xr.core.dataarray.DataArray':
-        lon = lon.values
-    if type(lat) == 'xr.core.dataarray.DataArray':
-        lat = lat.values
+    lon = xr2npy(lon)
+    lat = xr2npy(lat)
     query = tree.query([lon, lat], k=nbpts)
     return query
 
 
 def build_kdtree(lon, lat):
     """ build the KDTree for collection of lon/lat points """
-    if isinstance(lon, xr.core.dataarray.DataArray):
-        lond = lon.values
-    else:
-        lond = lon
-    if isinstance(lat, xr.core.dataarray.DataArray):
-        latd = lat.values
-    else:
-        latd = lat
-    tree = KDTree(list(zip(lond.ravel(), latd.ravel())))
+    lon = xr2npy(lon)
+    lat = xr2npy(lat)
+    tree = KDTree(list(zip(lon.ravel(), lat.ravel())))
     return tree
 
 
@@ -299,3 +298,111 @@ def change_lon_reference(lon_in, lon_ref):
         else:
             pass
     return lon_in
+
+
+def compute_slope_midpoints(ds, lonmodel):
+    """ compute slope midpoints from xarray.Dataset using
+    lon, lat bounds """
+    # compute mid-slope points
+    ds['lon_mid'] = ds['lon'].mean(dim='bounds')
+    ds['lat_mid'] = ds['lat'].mean(dim='bounds')
+    # correct for periodicity based on model's longitude range
+    ds['lon_mid'] = change_lon_reference(ds['lon_mid'], lonmodel)
+    return ds
+
+
+def slope_midpoints_to_model_cells(ds, tree_model, lonmodel,
+                                   clonmid='lon_mid',
+                                   clatmid='lat_mid',
+                                   csection='cross_section'):
+    """ for each slope in ds, find the closest model cell
+    using a KDtree and return lists of [i,j] of found cells"""
+
+    nsections = len(ds[clonmid])
+
+    ilist = []
+    jlist = []
+    for k in range(nsections):
+        q = find_closest_grid_cell_kdtree(ds[clonmid].isel({csection: k}),
+                                          ds[clatmid].isel({csection: k}),
+                                          tree_model, nbpts=1)
+        d, i, j = query_to_model_indices(q, lonmodel)
+        ilist.append(i)
+        jlist.append(j)
+    return jlist, ilist
+
+
+def fill_between_cells(j1, i1, j2, i2, lonmodel, latmodel, cutoff=500000.):
+    """ fill model cells between 2 distant model cells to get continuous
+    segment """
+    lonmodel = xr2npy(lonmodel)
+    latmodel = xr2npy(latmodel)
+
+    # get lon/lat of points
+    if len(lonmodel.shape) == 2:
+        lon1 = lonmodel[j1, i1]
+        lon2 = lonmodel[j2, i2]
+    elif len(lonmodel.shape) == 1:
+        lon1 = lonmodel[i1]
+        lon2 = lonmodel[i2]
+
+    if len(latmodel.shape) == 2:
+        lat1 = latmodel[j1, i1]
+        lat2 = latmodel[j2, i2]
+    elif len(latmodel.shape) == 1:
+        lat1 = latmodel[i1]
+        lat2 = latmodel[i2]
+
+    # check against cutoff
+    rearth = 6400000.  # meters
+    dist = distance_on_unit_sphere(lat1, lon1, lat2, lon2) * rearth
+    # filter off points close due to periodicity
+    dlon = np.abs(lon2 - lon1)
+    dlon_cutoff = cutoff * 360 / (2 * np.pi * rearth)
+
+    jlist = []
+    ilist = []
+    # find intermediate points
+    if (dist < cutoff) and (dlon < dlon_cutoff):
+        # create a list of intermediate points and init to first point.
+        jlist.append(j1)
+        ilist.append(i1)
+        iterate = True
+        while iterate:
+            # iterate until we arrive at the last point
+            if (jlist[-1] == j2) and (ilist[-1] == i2):
+                iterate = False
+            else:
+                # compute distance in i and j
+                # and unit step (1 or -1) depending on
+                # relative positions
+                jpts = np.abs(j2 - jlist[-1])
+                jstep = (j2 - jlist[-1]) / jpts
+                ipts = np.abs(i2 - ilist[-1])
+                istep = (i2 - ilist[-1]) / ipts
+                # move one point in max(ipts, jpts)
+                if jpts > ipts:
+                    jlist.append(jlist[-1] + jstep)
+                    ilist.append(ilist[-1])
+                else:
+                    jlist.append(jlist[-1])
+                    ilist.append(ilist[-1] + istep)
+    return jlist, ilist
+
+
+def find_all_model_slope_cells(jlist_distantcells, ilist_distantcells,
+                               lonmodel, latmodel, cutoff=500000.):
+    """ fill in the gaps in the list of model cells on the slope """
+
+    jlist_contigcells = []
+    ilist_contigcells = []
+
+    for k in tqdm(range(len(jlist_distantcells)-1)):
+        j1, j2 = jlist_distantcells[k:k+2]
+        i1, i2 = ilist_distantcells[k:k+2]
+        jltmp, iltmp = fill_between_cells(j1, i1, j2, i2,
+                                          lonmodel, latmodel,
+                                          cutoff=cutoff)
+        jlist_contigcells += jltmp
+        ilist_contigcells += iltmp
+    return jlist_contigcells, ilist_contigcells
