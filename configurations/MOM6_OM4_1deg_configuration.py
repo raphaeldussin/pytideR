@@ -108,11 +108,13 @@ jmodel_dist, imodel_dist = pytideR.slope_midpoints_to_model_cells(ds_kelly,
                                                                   geolon)
 
 plt.figure()
+plt.pcolormesh(mask, cmap='binary_r')
 plt.scatter(imodel_dist, jmodel_dist,
             c=np.arange(len(imodel_dist)),
             cmap='nipy_spectral')
 plt.colorbar()
 plt.title('non-contiguous cells')
+#plt.close()
 
 jmodel_cont, imodel_cont = pytideR.find_all_model_slope_cells(jmodel_dist,
                                                               imodel_dist,
@@ -121,9 +123,45 @@ jmodel_cont, imodel_cont = pytideR.find_all_model_slope_cells(jmodel_dist,
                                                               cutoff=500000.)
 
 plt.figure()
+plt.pcolormesh(mask, cmap='binary_r')
 plt.scatter(imodel_cont, jmodel_cont,
             c=np.arange(len(imodel_cont)),
             cmap='nipy_spectral')
 plt.colorbar()
 plt.title('contiguous cells')
+#plt.show()
+
+jmodel_skimmed, imodel_skimmed = pytideR.skim_slope_cells(jmodel_cont, imodel_cont)
+
+plt.figure()
+plt.pcolormesh(mask, cmap='binary_r')
+plt.grid()
+plt.scatter(imodel_skimmed, jmodel_skimmed,
+            c=np.arange(len(imodel_skimmed)),
+            cmap='nipy_spectral')
+plt.colorbar()
+plt.title('contiguous+skimmed cells')
 plt.show()
+#plt.close()
+#plt.show()
+
+plt.close()
+
+tree_midpoints = pytideR.build_kdtree(ds_kelly['lon_mid'], ds_kelly['lat_mid'])
+
+trans1 = pytideR.interpolate_midpoint_values_to_model_cells(ds_kelly['trans'].isel(mode=1),
+                                                           tree_midpoints,
+                                                           imodel_cont, jmodel_cont,
+                                                           geolon, geolat)
+
+
+trans1plt = np.ma.masked_values(trans1, 1e+15)
+plt.figure()
+plt.pcolormesh(geolon, geolat, trans1plt, cmap='jet')
+plt.colorbar()
+plt.show()
+
+#q = pytideR.find_closest_grid_cell_kdtree(geolon[int(jmodel_cont[0]), int(imodel_cont[0])],
+#                                  geolat[int(jmodel_cont[0]), int(imodel_cont[0])], tree_midpoints, nbpts=2)
+#
+#print(q)

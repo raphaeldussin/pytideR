@@ -14,6 +14,18 @@ def find_costal_cells(mask):
 
     the mask passed should be the ocean mask (i.e. 1 on ocean/ 0 on land)
     we expand land (0) values by eroding ocean (1) values
+
+    PARAMETERS:
+    -----------
+
+    mask: xarray.DataArray
+        land sea mask
+
+    RETURN:
+    -------
+
+    coast: np.array
+        2d binary (1/0) mask of coastal cells
     """
     # work on nx+1, ny+1 arrays to avoid boundary issues
     ny, nx = mask.values.shape
@@ -382,11 +394,11 @@ def fill_between_cells(j1, i1, j2, i2, lonmodel, latmodel, cutoff=500000.):
                 istep = (i2 - ilist[-1]) / ipts
                 # move one point in max(ipts, jpts)
                 if jpts > ipts:
-                    jlist.append(jlist[-1] + jstep)
+                    jlist.append(jlist[-1] + int(jstep))
                     ilist.append(ilist[-1])
                 else:
                     jlist.append(jlist[-1])
-                    ilist.append(ilist[-1] + istep)
+                    ilist.append(ilist[-1] + int(istep))
     return jlist, ilist
 
 
@@ -406,3 +418,100 @@ def find_all_model_slope_cells(jlist_distantcells, ilist_distantcells,
         jlist_contigcells += jltmp
         ilist_contigcells += iltmp
     return jlist_contigcells, ilist_contigcells
+
+
+def skim_slope_cells(jcells, icells):
+    """ remove cells that are surrounded by 5 neighbors or more """
+    jout = []
+    iout = []
+    npts = len(jcells)
+    jicells = list(zip(jcells, icells))
+    for k in range(npts):
+        i = icells[k]
+        j = jcells[k]
+        ip1 = int(icells[k] + 1)
+        im1 = int(icells[k] - 1)
+        jp1 = int(jcells[k] + 1)
+        jm1 = int(jcells[k] - 1)
+        n_neighbors = 0
+        # check 8 closest cells
+        checked_neighbors = [(j, ip1), (jp1, ip1), (jp1, i), (jp1, im1),
+                             (j, im1), (jm1, im1), (jm1, i), (jm1, ip1)]
+        for neighbor in checked_neighbors:
+            # print(neighbor)
+            if neighbor in jicells:
+                n_neighbors += 1
+                # print(n_neighbors)
+        if n_neighbors < 6:
+            jout.append(j)
+            iout.append(i)
+    return jout, iout
+
+
+def interpolate_midpoint_values_to_model_cells(data_midpoints,
+                                               tree_midpoints,
+                                               imodel, jmodel,
+                                               lon_model, lat_model):
+    """ interpolate data from cross-sections' midpoints to corresponding
+    model cells found with the search and fill algorithms
+
+    PARAMETERS:
+    -----------
+
+    data_midpoints: xarray.DataArray
+        array of input data to interpolate on model grid
+    tree_midpoints: KDTree
+        tree of lon/lat positions of cross-sections
+    imodel, jmodel: list of int
+        model points that will receive a value
+    lon_model, lat_model: xarray.DataArray or np.array
+        2d lon/lat of the model grid
+
+    RETURN:
+    -------
+
+    data_out: np.array
+        the input data interpolated on model points
+    """
+    # inititialize output
+    data_out = 1e+15 * np.ones(lon_model.shape)
+    # zip j,i lists to have more compact indexing
+    jimodel = list(zip(jmodel, imodel))
+
+    nmodelpts = len(jimodel)
+    for k in range(nmodelpts):
+        # for each model point, find 2 closest slope points
+        # d = distance, csections = index of cross-section
+        d, csections = find_closest_grid_cell_kdtree(lon_model[jimodel[k]],
+                                                     lat_model[jimodel[k]],
+                                                     tree_midpoints, nbpts=2)
+        # make weighted average
+        wa = ((d[0] * data_midpoints.isel({'cross_section': csections[0]}) +
+               d[1] * data_midpoints.isel({'cross_section': csections[1]})) /
+              (d[0] + d[1]))
+        data_out[jimodel[k]] = wa
+    return data_out
+
+def interpolate_midpoint_ds_to_model_cells(ds_midpoints,
+                                           tree_midpoints,
+                                           imodel, jmodel,
+                                           lon_model, lat_model,
+                                           variables=['refl', 'trans'],
+                                           dims=('mode')):
+    """ interpolate dataset of midpoints values onto model grid 
+    
+    PARAMETERS:
+    -----------
+
+    lon_model, lat_model: xarray.DataArray
+    
+    
+    """
+
+    #shape 
+    out = xr.Dataset()
+    out['lon'] = lon_model
+    out['lat'] = lat_model
+
+
+    return out
