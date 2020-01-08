@@ -448,18 +448,16 @@ def skim_slope_cells(jcells, icells):
     return jout, iout
 
 
-def interpolate_midpoint_values_to_model_cells(data_midpoints,
-                                               tree_midpoints,
-                                               imodel, jmodel,
-                                               lon_model, lat_model):
-    """ interpolate data from cross-sections' midpoints to corresponding
-    model cells found with the search and fill algorithms
+def create_mapping_midpoints_to_model_cells(tree_midpoints,
+                                            imodel, jmodel,
+                                            lon_model, lat_model):
+    """ create mapping to interpolate data from cross-sections'
+    midpoints to corresponding model cells found with the search
+    and fill algorithms.
 
     PARAMETERS:
     -----------
 
-    data_midpoints: xarray.DataArray
-        array of input data to interpolate on model grid
     tree_midpoints: KDTree
         tree of lon/lat positions of cross-sections
     imodel, jmodel: list of int
@@ -470,11 +468,12 @@ def interpolate_midpoint_values_to_model_cells(data_midpoints,
     RETURN:
     -------
 
-    data_out: np.array
-        the input data interpolated on model points
+    mapping: dict
+        mapping of the form (jmodel, imodel) : ([dist0, dist1],
+                                                [section0, section1])
     """
-    # inititialize output
-    data_out = 1e+15 * np.ones(lon_model.shape)
+
+    mapping = {}
     # zip j,i lists to have more compact indexing
     jimodel = list(zip(jmodel, imodel))
 
@@ -485,33 +484,75 @@ def interpolate_midpoint_values_to_model_cells(data_midpoints,
         d, csections = find_closest_grid_cell_kdtree(lon_model[jimodel[k]],
                                                      lat_model[jimodel[k]],
                                                      tree_midpoints, nbpts=2)
-        # make weighted average
-        wa = ((d[0] * data_midpoints.isel({'cross_section': csections[0]}) +
-               d[1] * data_midpoints.isel({'cross_section': csections[1]})) /
-              (d[0] + d[1]))
-        data_out[jimodel[k]] = wa
-    return data_out
+        mapping[jimodel[k]] = [d, csections]
 
-def interpolate_midpoint_ds_to_model_cells(ds_midpoints,
-                                           tree_midpoints,
-                                           imodel, jmodel,
-                                           lon_model, lat_model,
-                                           variables=['refl', 'trans'],
-                                           dims=('mode')):
-    """ interpolate dataset of midpoints values onto model grid 
-    
+    return mapping
+
+
+def interpolate_slope_data_to_model_cells(da, mapping,
+                                          lon_model, lat_model,
+                                          sectiondim='cross_section'):
+    """ interpolate slope values onto flagged model cells
+
     PARAMETERS:
     -----------
 
-    lon_model, lat_model: xarray.DataArray
-    
-    
+    RETURNS:
+    --------
+
+    out: xarray.DataArray
+        slope data projected onto flagged model cells
     """
 
-    #shape 
+    # inititialize output
+    shape_out = lon_model.shape
+    data_out = 1e+15 * np.ones(shape_out)
+
+    for jimodel in mapping:
+        # extract slope data
+        dist, idx_section = mapping[jimodel]
+        # make weighted average
+        wa = ((dist[0] * da.isel({sectiondim: idx_section[0]}) +
+               dist[1] * da.isel({sectiondim: idx_section[1]})) /
+              (dist[0] + dist[1]))
+        data_out[jimodel] = wa
+
+    out = xr.DataArray(data=data_out, dims=lon_model.dims)
+
+    return out
+
+
+def interpolate_slope_dataset_to_model_cells(ds, mapping,
+                                             lon_model, lat_model,
+                                             variables=['trans', 'refl'],
+                                             sectiondim='cross_section',
+                                             modedim='mode'):
+    """
+
+    """
+
     out = xr.Dataset()
     out['lon'] = lon_model
     out['lat'] = lat_model
+    out[modedim] = ds[modedim]
 
+    for var in variables:
+        varname = ds[var].name
+        da_out = xr.DataArray()
+        for mode in ds[var][modedim]:
+            inputdata = ds[var].sel({modedim: mode})
+            tmp = interpolate_slope_data_to_model_cells(inputdata, mapping,
+                                                        lon_model, lat_model,
+                                                        sectiondim=sectiondim)
+            if modedim in da_out.dims:
+                # appending mode
+                da_out = xr.concat([da_out, tmp], dim=modedim)
+            else:
+                # first mode
+                tmp = tmp.expand_dims([modedim], axis=0)
+                da_out = tmp.copy()
+        da_out.assign_coords({modedim: ds[modedim]})
+        out[varname] = da_out
+        out[varname].attrs = {'_FillValue': 1e+15}
 
     return out

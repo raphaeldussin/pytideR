@@ -68,7 +68,7 @@ if check:
 ds_kelly = pytideR.load_kelly2013_data(matfile=f'{projectdir}/pytideR/data/slope_16.mat')
 
 # exploring the data
-explore = True
+explore = False
 if explore:
     plt.figure()
     plt.scatter(ds_kelly['lon'].sel(bounds='down'),
@@ -107,14 +107,16 @@ jmodel_dist, imodel_dist = pytideR.slope_midpoints_to_model_cells(ds_kelly,
                                                                   tree_model,
                                                                   geolon)
 
-plt.figure()
-plt.pcolormesh(mask, cmap='binary_r')
-plt.scatter(imodel_dist, jmodel_dist,
-            c=np.arange(len(imodel_dist)),
-            cmap='nipy_spectral')
-plt.colorbar()
-plt.title('non-contiguous cells')
-#plt.close()
+check_model_pts = False
+
+if check_model_pts:
+    plt.figure()
+    plt.pcolormesh(mask, cmap='binary_r')
+    plt.scatter(imodel_dist, jmodel_dist,
+                c=np.arange(len(imodel_dist)),
+                cmap='nipy_spectral')
+    plt.colorbar()
+    plt.title('non-contiguous cells')
 
 jmodel_cont, imodel_cont = pytideR.find_all_model_slope_cells(jmodel_dist,
                                                               imodel_dist,
@@ -122,46 +124,45 @@ jmodel_cont, imodel_cont = pytideR.find_all_model_slope_cells(jmodel_dist,
                                                               geolat,
                                                               cutoff=500000.)
 
-plt.figure()
-plt.pcolormesh(mask, cmap='binary_r')
-plt.scatter(imodel_cont, jmodel_cont,
-            c=np.arange(len(imodel_cont)),
-            cmap='nipy_spectral')
-plt.colorbar()
-plt.title('contiguous cells')
-#plt.show()
+if check_model_pts:
+    plt.figure()
+    plt.pcolormesh(mask, cmap='binary_r')
+    plt.scatter(imodel_cont, jmodel_cont,
+                c=np.arange(len(imodel_cont)),
+                cmap='nipy_spectral')
+    plt.colorbar()
+    plt.title('contiguous cells')
 
-jmodel_skimmed, imodel_skimmed = pytideR.skim_slope_cells(jmodel_cont, imodel_cont)
+jmodel_skimmed, imodel_skimmed = pytideR.skim_slope_cells(jmodel_cont,
+                                                          imodel_cont)
 
-plt.figure()
-plt.pcolormesh(mask, cmap='binary_r')
-plt.grid()
-plt.scatter(imodel_skimmed, jmodel_skimmed,
-            c=np.arange(len(imodel_skimmed)),
-            cmap='nipy_spectral')
-plt.colorbar()
-plt.title('contiguous+skimmed cells')
-plt.show()
-#plt.close()
-#plt.show()
+if check_model_pts:
+    plt.figure()
+    plt.pcolormesh(mask, cmap='binary_r')
+    plt.grid()
+    plt.scatter(imodel_skimmed, jmodel_skimmed,
+                c=np.arange(len(imodel_skimmed)),
+                cmap='nipy_spectral')
+    plt.colorbar()
+    plt.title('contiguous+skimmed cells')
+    plt.show()
 
-plt.close()
+
+# --- mapping of slope data onto model cells:
 
 tree_midpoints = pytideR.build_kdtree(ds_kelly['lon_mid'], ds_kelly['lat_mid'])
 
-trans1 = pytideR.interpolate_midpoint_values_to_model_cells(ds_kelly['trans'].isel(mode=1),
-                                                           tree_midpoints,
-                                                           imodel_cont, jmodel_cont,
-                                                           geolon, geolat)
+# RD: this should be done on skimmed cells
+mapping = pytideR.create_mapping_midpoints_to_model_cells(tree_midpoints,
+                                                          imodel_cont,
+                                                          jmodel_cont,
+                                                          geolon,
+                                                          geolat)
+
+ds_out = pytideR.interpolate_slope_dataset_to_model_cells(ds_kelly, mapping,
+                                                          geolon, geolat)
 
 
-trans1plt = np.ma.masked_values(trans1, 1e+15)
-plt.figure()
-plt.pcolormesh(geolon, geolat, trans1plt, cmap='jet')
-plt.colorbar()
-plt.show()
+print(ds_out)
 
-#q = pytideR.find_closest_grid_cell_kdtree(geolon[int(jmodel_cont[0]), int(imodel_cont[0])],
-#                                  geolat[int(jmodel_cont[0]), int(imodel_cont[0])], tree_midpoints, nbpts=2)
-#
-#print(q)
+ds_out.to_netcdf('internal_waves_RTcoef_1deg.nc')
