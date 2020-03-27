@@ -107,7 +107,7 @@ jmodel_dist, imodel_dist = pytideR.slope_midpoints_to_model_cells(ds_kelly,
                                                                   tree_model,
                                                                   geolon)
 
-check_model_pts = False
+check_model_pts = True
 
 if check_model_pts:
     plt.figure()
