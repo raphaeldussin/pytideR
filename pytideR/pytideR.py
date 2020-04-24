@@ -6,6 +6,7 @@ from scipy.ndimage import binary_erosion
 from numba import njit
 from scipy.spatial import KDTree
 from tqdm import tqdm
+import math
 
 
 def find_costal_cells(mask):
@@ -377,28 +378,63 @@ def fill_between_cells(j1, i1, j2, i2, lonmodel, latmodel, cutoff=500000.):
     # find intermediate points
     if (dist < cutoff) and (dlon < dlon_cutoff):
         # create a list of intermediate points and init to first point.
-        jlist.append(j1)
-        ilist.append(i1)
-        iterate = True
-        while iterate:
-            # iterate until we arrive at the last point
-            if (jlist[-1] == j2) and (ilist[-1] == i2):
-                iterate = False
+        deltai = np.abs(i2 - i1)
+        deltaj = np.abs(j2 - j1)
+        print('di, dj = ', deltai, deltaj)
+        if max(deltai, deltaj) == 0:
+            # same starting/ending point
+            ilist.append(i1)
+            jlist.append(j1)
+        elif max(deltai, deltaj) == 1:
+            # points are direct neighbors
+            ilist.append(i1)
+            ilist.append(i2)
+            jlist.append(j1)
+            jlist.append(j2)
+        elif max(deltai, deltaj) > 1:
+            if deltai > deltaj:
+                # iterate over i
+                alpha = (j2 - j1) / (i2 - i1)
+                for i in range(min(i1, i2), max(i1, i2)):
+                    j = np.around(j1 + alpha * (i - i1))
+                    ilist.append(i)
+                    jlist.append(int(j))
+            elif (deltaj >= deltai):
+                # iterate over j
+                alpha = (i2 - i1) / (j2 - j1)
+                for j in range(min(j1, j2), max(j1, j2)):
+                    i = np.around(i1 + alpha * (j - j1))
+                    ilist.append(int(i))
+                    jlist.append(j)
             else:
-                # compute distance in i and j
-                # and unit step (1 or -1) depending on
-                # relative positions
-                jpts = np.abs(j2 - jlist[-1])
-                jstep = (j2 - jlist[-1]) / jpts
-                ipts = np.abs(i2 - ilist[-1])
-                istep = (i2 - ilist[-1]) / ipts
-                # move one point in max(ipts, jpts)
-                if jpts > ipts:
-                    jlist.append(jlist[-1] + int(jstep))
-                    ilist.append(ilist[-1])
-                else:
-                    jlist.append(jlist[-1])
-                    ilist.append(ilist[-1] + int(istep))
+                raise ValueError("you should not see this")
+        else:
+            raise ValueError("you should not see this")
+        # old code
+        #jlist.append(j1)
+        #ilist.append(i1)
+        #iterate = True
+        #while iterate:
+        #    # iterate until we arrive at the last point
+        #    if (jlist[-1] == j2) and (ilist[-1] == i2):
+        #        iterate = False
+        #    else:
+        #        # compute distance
+        # 
+        # in i and j
+        #        # and unit step (1 or -1) depending on
+        #        # relative positions
+        #        jpts = np.abs(j2 - jlist[-1])
+        #        jstep = (j2 - jlist[-1]) / jpts
+        #        ipts = np.abs(i2 - ilist[-1])
+        #        istep = (i2 - ilist[-1]) / ipts
+        #        # move one point in max(ipts, jpts)
+        #        if jpts > ipts:
+        #            jlist.append(jlist[-1] + int(jstep))
+        #            ilist.append(ilist[-1])
+        #        else:
+        #            jlist.append(jlist[-1])
+        #            ilist.append(ilist[-1] + int(istep))
     return jlist, ilist
 
 
@@ -442,7 +478,7 @@ def skim_slope_cells(jcells, icells):
             if neighbor in jicells:
                 n_neighbors += 1
                 # print(n_neighbors)
-        if n_neighbors < 6:
+        if n_neighbors < 5:
             jout.append(j)
             iout.append(i)
     return jout, iout
@@ -556,3 +592,58 @@ def interpolate_slope_dataset_to_model_cells(ds, mapping,
         out[varname].attrs = {'_FillValue': 1e+15}
 
     return out
+
+
+def find_max_slope(i, j, bathy_halo):
+
+    bathy_local = bathy_halo[j-1:j+2, i:i+3].copy()
+    bathy_slopes = bathy_local - bathy_halo[j, i+1].copy()
+    bathy_slopes[1,1] = -1e+20
+    #bathy_slopes[np.where(bathy_slopes <= 0)] = -1e+20
+    #print(bathy_slopes)
+    #print(bathy_slopes.argmax())
+    jmaxslope, imaxslope = np.unravel_index(bathy_slopes.argmax(),
+                                            bathy_slopes.shape)
+
+    print('jmaxslope, imaxslope', jmaxslope, imaxslope)
+    return jmaxslope, imaxslope
+
+
+def compute_angle_from_bathy(i, j, bathy_halo):
+
+    jmaxslope, imaxslope = find_max_slope(i, j, bathy_halo)
+    angleslope = math.atan2(jmaxslope, imaxslope)
+    # make sure the angle is positive
+    #angleslope = np.mod(angleslope + 2*np.pi, 2*np.pi)
+    #print(angleslope)
+    # to get perpendicular angle, add 90
+    #angle_perp = np.mod(angleslope + (np.pi/2), 2*np.pi)
+    angle_perp = angleslope + (np.pi/2)
+    # reconvert to radian
+    #angle_perp = np.pi * angle_perp / 180.
+
+    return angle_perp
+
+
+def create_angle_array(i_cells_model, j_cells_model, bathymetry, spval=1e+20):
+
+    ny, nx = bathymetry.shape
+    bathy_halo = np.empty((ny, nx+2))
+    bathy_halo[:, 1:-1] = bathymetry.values
+    bathy_halo[:, 0] = bathymetry[:, -1]
+    bathy_halo[:, -1] = bathymetry[:, 0]
+
+    data_angle = spval * np.ones(bathymetry.shape)
+    for kcell in range(len(i_cells_model)):
+        data_angle[j_cells_model[kcell], i_cells_model[kcell]] = compute_angle_from_bathy(i_cells_model[kcell],
+                                                                                          j_cells_model[kcell],
+                                                                                          bathy_halo)
+
+    data_angle = np.ma.masked_values(data_angle, spval)
+    out = xr.DataArray(data=data_angle, dims=bathymetry.dims)
+    return out
+
+
+#def create_bogus_array(i_cells_model, j_cells_model, bathymetry):
+
+#    ny, nx = bathymetry.shape

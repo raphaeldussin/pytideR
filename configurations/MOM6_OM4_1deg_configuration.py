@@ -8,12 +8,16 @@ import pytideR
 import matplotlib.pylab as plt
 import numpy as np
 import scipy.io
+from sectionate import get_broken_line_from_contour
 
-projectdir = '/home/Raphael.Dussin/Sonya/Internal_tides_reflection/'
+# projectdir = '/home/Raphael.Dussin/Sonya/Internal_tides_reflection/'
+projectdir = '/Users/raphael/dev/InternalTides_Sonya/'
 bendir = f'{projectdir}/from_ben/raytracing_deliverables/'
 
-griddir = '/home/Raphael.Dussin/Sonya/Internal_tides_reflection/pytideR/data/'
+# griddir = '/home/Raphael.Dussin/Sonya/Internal_tides_reflection/pytideR/data/'
+griddir = '/Users/raphael/dev/InternalTides_Sonya/pytideR/data/'
 mask = xr.open_dataset(f'{griddir}/ocean_mask_OM_1deg.nc')['mask']
+bathy = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['D']
 geolon = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['geolon']
 geolat = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['geolat']
 
@@ -64,6 +68,50 @@ if check:
     plt.grid()
     plt.show()
 
+# Actually that's great we're reproducing but we'd like the angles at 250 meters deep.
+mask_250m = xr.ones_like(bathy)
+mask_250m = mask_250m.where(bathy >= 250.).fillna(0.)
+
+check = False
+if check:
+    plt.figure(figsize=[12, 10])
+    plt.pcolormesh(mask_250m)
+    plt.colorbar()
+    plt.show()
+
+isobath_250m = pytideR.find_costal_cells(mask_250m)
+jcelliso250m, icelliso250m = np.where(isobath_250m >= 0.98)
+
+angle_250m = pytideR.define_angle(isobath_250m, mask_250m)
+
+check = False
+if check:
+    plt.figure(figsize=[12, 10])
+    plt.pcolormesh(cnx, cny,
+                   angle_250m.where(angle_250m != 1.e+20).values)
+    plt.colorbar()
+    plt.grid()
+    plt.show()
+
+
+#stop
+
+# Other method: use contour directly
+
+plt.figure()
+C = plt.contour(bathy, [249, 251])
+iseg, jseg = get_broken_line_from_contour(C, rounding='down', maxdist=3)
+plt.close()
+
+plt.figure()
+plt.plot(iseg, jseg, 'ko')
+plt.title('bathy 250m points')
+#plt.show()
+
+#stop
+
+
+
 # Loading slope coeficients from Sam Kelly
 ds_kelly = pytideR.load_kelly2013_data(matfile=f'{projectdir}/pytideR/data/slope_16.mat')
 
@@ -98,8 +146,15 @@ if explore:
                 cmap='nipy_spectral')
     plt.colorbar()
 
+#plt.show()
+
+#stop 
 
 ds_kelly = pytideR.compute_slope_midpoints(ds_kelly, geolon)
+
+ds_kelly.to_netcdf('kelly_dataset.nc')
+
+#stop
 
 tree_model = pytideR.build_kdtree(geolon, geolat)
 
@@ -107,6 +162,7 @@ jmodel_dist, imodel_dist = pytideR.slope_midpoints_to_model_cells(ds_kelly,
                                                                   tree_model,
                                                                   geolon)
 
+print(len(jmodel_dist), len(imodel_dist))
 check_model_pts = True
 
 if check_model_pts:
@@ -124,6 +180,10 @@ jmodel_cont, imodel_cont = pytideR.find_all_model_slope_cells(jmodel_dist,
                                                               geolat,
                                                               cutoff=500000.)
 
+print(len(jmodel_cont), len(imodel_cont))
+
+#stop
+
 if check_model_pts:
     plt.figure()
     plt.pcolormesh(mask, cmap='binary_r')
@@ -133,19 +193,19 @@ if check_model_pts:
     plt.colorbar()
     plt.title('contiguous cells')
 
-jmodel_skimmed, imodel_skimmed = pytideR.skim_slope_cells(jmodel_cont,
-                                                          imodel_cont)
+#jmodel_skimmed, imodel_skimmed = pytideR.skim_slope_cells(jmodel_cont,
+#                                                          imodel_cont)
 
-if check_model_pts:
-    plt.figure()
-    plt.pcolormesh(mask, cmap='binary_r')
-    plt.grid()
-    plt.scatter(imodel_skimmed, jmodel_skimmed,
-                c=np.arange(len(imodel_skimmed)),
-                cmap='nipy_spectral')
-    plt.colorbar()
-    plt.title('contiguous+skimmed cells')
-    plt.show()
+#if check_model_pts:
+#    plt.figure()
+#    plt.pcolormesh(mask, cmap='binary_r')
+#    plt.grid()
+#    plt.scatter(imodel_skimmed, jmodel_skimmed,
+#                c=np.arange(len(imodel_skimmed)),
+#                cmap='nipy_spectral')
+#    plt.colorbar()
+#    plt.title('contiguous+skimmed cells')
+#    plt.show()
 
 
 # --- mapping of slope data onto model cells:
@@ -163,6 +223,10 @@ ds_out = pytideR.interpolate_slope_dataset_to_model_cells(ds_kelly, mapping,
                                                           geolon, geolat)
 
 
-print(ds_out)
+ds_out['refl_angle'] = pytideR.create_angle_array(imodel_cont, jmodel_cont,
+                                                  bathy)
+
+#print(ds_out)
+ds_out['refl_pref'] = ds_out['refl']
 
 ds_out.to_netcdf('internal_waves_RTcoef_1deg.nc')
