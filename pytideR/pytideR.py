@@ -168,7 +168,7 @@ def load_kelly2013_data(matfile='slope_16.mat'):
     z = rawdata['slope']['z'][0][0][0]
     # section has no natural value, set list of integers
     section = np.arange(nsections)
-    mode = 1 + np.arange(nmodes)  # mode 0 is surface mode in litterature
+    mode = 1. + np.arange(nmodes)  # mode 0 is surface mode in litterature
     bounds = ['down', 'up']
 
     ds = xr.Dataset()
@@ -542,7 +542,7 @@ def interpolate_slope_data_to_model_cells(da, mapping,
 
     # inititialize output
     shape_out = lon_model.shape
-    data_out = 1e+15 * np.ones(shape_out)
+    data_out = 1.e+20 * np.ones(shape_out)
 
     for jimodel in mapping:
         # extract slope data
@@ -568,8 +568,8 @@ def interpolate_slope_dataset_to_model_cells(ds, mapping,
     """
 
     out = xr.Dataset()
-    out['lon'] = lon_model
-    out['lat'] = lat_model
+    #out['lon'] = lon_model
+    #out['lat'] = lat_model
     out[modedim] = ds[modedim]
 
     for var in variables:
@@ -589,43 +589,170 @@ def interpolate_slope_dataset_to_model_cells(ds, mapping,
                 da_out = tmp.copy()
         da_out.assign_coords({modedim: ds[modedim]})
         out[varname] = da_out
-        out[varname].attrs = {'_FillValue': 1e+15}
+        out[varname].attrs = {'_FillValue': 1e+20}
 
     return out
 
 
-def find_max_slope(i, j, bathy_halo):
+def find_angle_shelf(i, j, bathy_halo):
 
+    # copy the 3x3 local bathy, i-indices uses halo offset
     bathy_local = bathy_halo[j-1:j+2, i:i+3].copy()
-    bathy_slopes = bathy_local - bathy_halo[j, i+1].copy()
-    bathy_slopes[1,1] = -1e+20
-    #bathy_slopes[np.where(bathy_slopes <= 0)] = -1e+20
-    #print(bathy_slopes)
-    #print(bathy_slopes.argmax())
-    jmaxslope, imaxslope = np.unravel_index(bathy_slopes.argmax(),
-                                            bathy_slopes.shape)
+    # and create a corresponding mask (0 = shallower / 1 = deeper)
+    bathy_mask = np.ones((3, 3))
+    # save the center point value to use as threshold
+    cutoff = bathy_local[1, 1].copy()
+    # set all points deeper than threshold to large value
+    bathy_local[1, 1] = 1.e+20
+    # find the shallowest point in the local bathy
+    jshallowest, ishallowest = np.unravel_index(bathy_local.argmin(),
+                                                bathy_local.shape)
+    print('jshallowest, ishallowest', jshallowest, ishallowest)
+    # add this point to the mask
+    bathy_mask[jshallowest, ishallowest] = 0
+    # find out if shallowest point is on a corner of the 3x3 array
+    is_corner = True if np.mod(jshallowest + ishallowest, 2) == 0 else False
 
-    print('jmaxslope, imaxslope', jmaxslope, imaxslope)
-    return jmaxslope, imaxslope
+    if is_corner:
+        # find which neighbor is varying slowest
+        neighbor1 = bathy_local[jshallowest, 1]
+        neighbor2 = bathy_local[1, ishallowest]
+        if (neighbor2 < neighbor1) and (neighbor2 <= cutoff):
+            bathy_mask[1, ishallowest] = 0
+            # following neighbor2 in a straight line is
+            # j = 0 if jshallowest = 2 and j = 2 if jshallowest = 0
+            jnb = np.mod(jshallowest+2, 4)
+            neighbor2n = bathy_local[jnb, ishallowest]
+            if (neighbor1 > neighbor2n) and (neighbor2n <= cutoff):
+                # strait line case
+                bathy_mask[jnb, ishallowest] = 0
+            elif (neighbor1 <= neighbor2n) and (neighbor1 <= cutoff):
+                # hard corner case
+                bathy_mask[jshallowest, 1] = 0
+        elif (neighbor1 < neighbor2) and (neighbor1 <= cutoff):
+            bathy_mask[jshallowest, 1] = 0
+            # following neighbor1 in a straight line is
+            # i = 0 if ishallowest = 2 and i = 2 if ishallowest = 0
+            inb = np.mod(ishallowest+2, 4)
+            neighbor2n = bathy_local[jshallowest, inb]
+            if (neighbor2 > neighbor2n) and (neighbor2n <= cutoff):
+                # strait line case
+                bathy_mask[jshallowest, inb] = 0
+            elif (neighbor2 <= neighbor2n) and (neighbor2 <= cutoff):
+                # hard corner case
+                bathy_mask[1, ishallowest] = 0
+    else:
+        # find out which axis to vary
+        vary_x = True if np.mod(jshallowest, 2) == 0 else False
+        vary_y = True if np.mod(ishallowest, 2) == 0 else False
+        assert not vary_x == vary_y
+        if vary_x:
+            neighbor1 = bathy_local[jshallowest, 0]
+            neighbor2 = bathy_local[jshallowest, 2]
+            # here we don't care which is deeper, only needs be above cutoff
+            if (neighbor1 < cutoff):
+                bathy_mask[jshallowest, 0] = 0
+            if (neighbor2 < cutoff):
+                bathy_mask[jshallowest, 2] = 0
+        if vary_y:
+            neighbor1 = bathy_local[0, ishallowest]
+            neighbor2 = bathy_local[2, jshallowest]
+            # here we don't care which is deeper, only needs be above cutoff
+            if (neighbor1 < cutoff):
+                bathy_mask[0, ishallowest] = 0
+            if (neighbor2 < cutoff):
+                bathy_mask[2, ishallowest] = 0
+
+    print("point masked: ", 9 - bathy_mask.sum())
+    # done figuring out the local shelf mask, now get angle
+    # keep ben's notation, later change to explicit left, upperleft,...
+    n1 = (bathy_mask[1, 2] == 0)
+    n2 = (bathy_mask[2, 2] == 0)
+    n3 = (bathy_mask[2, 1] == 0)
+    n4 = (bathy_mask[2, 0] == 0)
+    n5 = (bathy_mask[1, 0] == 0)
+    n6 = (bathy_mask[0, 0] == 0)
+    n7 = (bathy_mask[0, 1] == 0)
+    n8 = (bathy_mask[0, 2] == 0)
+
+    # TO DO: 4+ points scenarios
+    # strait coast scenarios
+    if n1 and n2 and n8:
+        angledata = 3 * np.pi / 2.
+    elif n2 and n3 and n4:
+        angledata = 0.
+    elif n4 and n5 and n6:
+        angledata = 1 * np.pi / 2.
+    elif n6 and n7 and n8:
+        angledata = 2 * np.pi / 2.
+    # hard corners scenarios
+    elif n1 and n3:
+        angledata = 7 * np.pi / 4.
+    elif n3 and n5:
+        angledata = 1 * np.pi / 4.
+    elif n5 and n7:
+        angledata = 3 * np.pi / 4.
+    elif n1 and n7:
+        angledata = 5 * np.pi / 4.
+    # mild corner scenarios (merid)
+    elif n1 and n2:
+        angledata = 13 * np.pi / 8.
+    elif n4 and n5:
+        angledata = 3 * np.pi / 8.
+    elif n5 and n6:
+        angledata = 5 * np.pi / 8.
+    elif n1 and n8:
+        angledata = 11 * np.pi / 8.
+    # mild corner scenarios (zonal)
+    elif n2 and n3:
+        angledata = 15 * np.pi / 8.
+    elif n3 and n4:
+        angledata = 1 * np.pi / 8.
+    elif n6 and n7:
+        angledata = 7 * np.pi / 8.
+    elif n7 and n8:
+        angledata = 9 * np.pi / 8.
+    # single point scenarios
+    elif n1:
+        angledata = 3 * np.pi / 2.
+    elif n3:
+        angledata = 0.
+    elif n5:
+        angledata = 1 * np.pi / 2.
+    elif n7:
+        angledata = 2 * np.pi / 2.
+    # if corner only, repeat hard corners scenarios
+    elif n2:
+        angledata = 7 * np.pi / 4.
+    elif n4:
+        angledata = 1 * np.pi / 4.
+    elif n6:
+        angledata = 3 * np.pi / 4.
+    elif n8:
+        angledata = 5 * np.pi / 4.
+    else:
+        raise ValueError('case not found')
+
+    return angledata
 
 
-def compute_angle_from_bathy(i, j, bathy_halo):
+#def compute_angle_from_bathy(i, j, bathy_halo):
 
-    jmaxslope, imaxslope = find_max_slope(i, j, bathy_halo)
-    angleslope = math.atan2(jmaxslope, imaxslope)
+    #jmaxslope, imaxslope = find_max_slope(i, j, bathy_halo)
+    #angleslope = math.atan2(jmaxslope, imaxslope)
     # make sure the angle is positive
     #angleslope = np.mod(angleslope + 2*np.pi, 2*np.pi)
     #print(angleslope)
     # to get perpendicular angle, add 90
     #angle_perp = np.mod(angleslope + (np.pi/2), 2*np.pi)
-    angle_perp = angleslope + (np.pi/2)
+    #angle_perp = angleslope + (np.pi/2)
     # reconvert to radian
     #angle_perp = np.pi * angle_perp / 180.
 
-    return angle_perp
+#    return angle_perp
 
 
-def create_angle_array(i_cells_model, j_cells_model, bathymetry, spval=1e+20):
+def create_angle_array(i_cells_model, j_cells_model, bathymetry, spval=1.e+20):
 
     ny, nx = bathymetry.shape
     bathy_halo = np.empty((ny, nx+2))
@@ -635,15 +762,9 @@ def create_angle_array(i_cells_model, j_cells_model, bathymetry, spval=1e+20):
 
     data_angle = spval * np.ones(bathymetry.shape)
     for kcell in range(len(i_cells_model)):
-        data_angle[j_cells_model[kcell], i_cells_model[kcell]] = compute_angle_from_bathy(i_cells_model[kcell],
-                                                                                          j_cells_model[kcell],
-                                                                                          bathy_halo)
+        jtmp = j_cells_model[kcell]
+        itmp = i_cells_model[kcell]
+        data_angle[jtmp, itmp] = find_angle_shelf(itmp, jtmp, bathy_halo)
 
-    data_angle = np.ma.masked_values(data_angle, spval)
     out = xr.DataArray(data=data_angle, dims=bathymetry.dims)
     return out
-
-
-#def create_bogus_array(i_cells_model, j_cells_model, bathymetry):
-
-#    ny, nx = bathymetry.shape

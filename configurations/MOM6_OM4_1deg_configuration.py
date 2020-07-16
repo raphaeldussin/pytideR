@@ -20,6 +20,8 @@ mask = xr.open_dataset(f'{griddir}/ocean_mask_OM_1deg.nc')['mask']
 bathy = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['D']
 geolon = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['geolon']
 geolat = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['geolat']
+lonh = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['lonh']
+lath = xr.open_dataset(f'{griddir}/ocean_geometry_OM_1deg.nc')['lath']
 
 coast = pytideR.find_costal_cells(mask)
 jcoastalcell, icoastalcell = np.where(coast >= 0.98)
@@ -224,9 +226,46 @@ ds_out = pytideR.interpolate_slope_dataset_to_model_cells(ds_kelly, mapping,
 
 
 ds_out['refl_angle'] = pytideR.create_angle_array(imodel_cont, jmodel_cont,
-                                                  bathy)
+                                                  bathy, spval=-999.9)
 
-#print(ds_out)
 ds_out['refl_pref'] = ds_out['refl']
 
-ds_out.to_netcdf('internal_waves_RTcoef_1deg.nc')
+# test with ones
+ds_out['refl_pref'] = 1.0e+20 * xr.ones_like(ds_out['refl'])
+data = ds_out['refl_pref'].values
+data[np.where(ds_out['refl'].values < 2.)] = 1.
+ds_out['refl_pref'][:] = data
+
+ds_out = ds_out.expand_dims(dim='TIME')
+ds_out['mode'].encoding = {}
+ds_out['TIME'] = xr.DataArray(data=np.array([0.]), dims=('TIME'))
+ds_out['TIME'].attrs = {'units': "months since 0001-01-01 00:00:00",
+                        'timaxe_origin': "01-JAN-0001 00:00:00",
+                        'calendar': "NOLEAP",
+                        'modulo': " ",
+                        'axis': "T",
+                        '_FillValue': 1.e+20}
+
+
+
+
+ds_out['lonh'] = lonh
+ds_out['lath'] = lath
+
+ds_out = ds_out.rename({'lonh': 'LON', 'lath': 'LAT'})
+
+ds_out['LON'].attrs.update({'units': "degrees_east",
+                            'axis': "X",
+                            '_FillValue': 1.e+20})
+ds_out['LAT'].attrs.update({'units': "degrees_north",
+                            'axis': "Y",
+                            '_FillValue': 1.e+20})
+
+ds_out['refl_pref'].attrs.update({'_FillValue': 1.e+20})
+ds_out['refl_angle'].attrs.update({'_FillValue': -999.9})
+ds_out['mode'].attrs.update({'_FillValue': 1.e+20})
+
+ds_out = ds_out.isel(mode=0)
+ds_out['refl_dbl'] = xr.zeros_like(ds_out['refl_pref'])
+
+ds_out.to_netcdf('internal_waves_RTcoef_1deg_v7.nc', unlimited_dims='TIME')
