@@ -161,6 +161,16 @@ def load_kelly2013_data(matfile='slope_16.mat'):
     """
 
     rawdata = loadmat(matfile)
+
+    # coastlines data
+    kz = 3318
+    loncoast = np.array([])
+    latcoast = np.array([])
+    for k in range(kz):
+        loncoast = np.append(loncoast, rawdata["coast"]["lon"][0][0][0][k])
+    for k in range(kz):
+        latcoast = np.append(latcoast, rawdata["coast"]["lat"][0][0][0][k])
+
     nsections, nbounds = rawdata['slope']['lon'][0][0].shape
     _, nz = rawdata['slope']['z'][0][0].shape
     nmodes = rawdata['slope']['Nm'][0][0][0][0]
@@ -420,7 +430,7 @@ def fill_between_cells(j1, i1, j2, i2, lonmodel, latmodel, cutoff=500000.):
         #        iterate = False
         #    else:
         #        # compute distance
-        # 
+        #
         # in i and j
         #        # and unit step (1 or -1) depending on
         #        # relative positions
